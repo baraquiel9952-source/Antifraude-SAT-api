@@ -1,8 +1,10 @@
 const express = require('express');
+const cors = require('cors');
 const multer = require('multer');
 const { analizarPDF } = require('./lib/forensicAnalyzer');
 
 const app = express();
+app.use(cors()); // Permite llamadas desde cualquier frontend (ajusta origin si quieres restringir)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024 }, // 15 MB
