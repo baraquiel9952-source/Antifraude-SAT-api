@@ -1,0 +1,196 @@
+openapi: 3.0.3
+info:
+  title: Antifraude SAT API
+  description: >
+    Analiza documentos fiscales mexicanos (constancias, actas) y regresa un
+    score de confiabilidad 0-100 combinando análisis estructural del PDF,
+    escaneo de códigos QR contra dominios .gob.mx, y validación de RFC/CURP.
+  version: "3.0.0"
+servers:
+  - url: https://antifraude-sat-api.onrender.com
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+    AdminKeyAuth:
+      type: apiKey
+      in: header
+      name: x-admin-key
+  schemas:
+    Anomalia:
+      type: object
+      properties:
+        tipo: { type: string }
+        severidad: { type: string, enum: [alta, media, informativa] }
+        detalle: { type: string }
+    ResultadoAnalisis:
+      type: object
+      properties:
+        score: { type: integer, minimum: 0, maximum: 100 }
+        veredicto: { type: string, enum: [legitimo, sospechoso, fraudulento] }
+        confianza: { type: string, enum: [alta, media, baja] }
+        engine_version: { type: string }
+        tipo_documento: { type: string }
+        anomalias:
+          type: array
+          items: { $ref: '#/components/schemas/Anomalia' }
+        detalles_tecnicos: { type: object }
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /health:
+    get:
+      summary: Estado del servicio
+      security: []
+      responses:
+        '200': { description: OK }
+
+  /api/verificar:
+    post:
+      summary: Analiza un PDF y regresa un veredicto de confiabilidad
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                documento: { type: string, format: binary }
+                tipo_documento:
+                  type: string
+                  enum: [constancia_fiscal, acta, generico]
+      responses:
+        '200':
+          description: Resultado del análisis
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResultadoAnalisis' }
+        '400': { description: Falta el archivo o no es un PDF válido }
+        '401': { description: API key inválida o ausente }
+        '429': { description: Límite del plan alcanzado }
+
+  /api/verificar-lote:
+    post:
+      summary: Analiza varios PDFs en una sola llamada (máx. 20)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                documentos:
+                  type: array
+                  items: { type: string, format: binary }
+                tipo_documento:
+                  type: string
+                  enum: [constancia_fiscal, acta, generico]
+      responses:
+        '200': { description: Arreglo de resultados, uno por archivo }
+
+  /api/uso:
+    get:
+      summary: Plan y consumo del mes de la API key
+      responses:
+        '200': { description: OK }
+
+  /api/historial:
+    get:
+      summary: Historial de análisis de la API key (últimos 200)
+      parameters:
+        - name: limite
+          in: query
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        '200': { description: OK }
+
+  /api/reporte:
+    post:
+      summary: Genera un PDF descargable a partir de un resultado de /api/verificar
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                resultado: { $ref: '#/components/schemas/ResultadoAnalisis' }
+                nombre_documento: { type: string }
+      responses:
+        '200':
+          description: PDF del reporte
+          content:
+            application/pdf: {}
+
+  /api/admin/keys:
+    post:
+      summary: Crea una API key nueva (sin redeploy)
+      security: [{ AdminKeyAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nombre_cliente]
+              properties:
+                nombre_cliente: { type: string }
+                plan: { type: string, enum: [free, pro], default: free }
+      responses:
+        '200': { description: Clave creada }
+    get:
+      summary: Lista todas las API keys activas con su uso
+      security: [{ AdminKeyAuth: [] }]
+      responses:
+        '200': { description: OK }
+
+  /api/admin/keys/{clave}:
+    delete:
+      summary: Revoca una API key
+      security: [{ AdminKeyAuth: [] }]
+      parameters:
+        - name: clave
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Revocada }
+
+  /api/admin/plan:
+    post:
+      summary: Cambia el plan de una API key existente
+      security: [{ AdminKeyAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [api_key, plan]
+              properties:
+                api_key: { type: string }
+                plan: { type: string, enum: [free, pro] }
+      responses:
+        '200': { description: OK }
+
+  /api/admin/webhook:
+    post:
+      summary: Configura la URL de webhook de una API key (se llama cuando un análisis sale "fraudulento")
+      security: [{ AdminKeyAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [api_key]
+              properties:
+                api_key: { type: string }
+                webhook_url: { type: string, format: uri }
+      responses:
+        '200': { description: OK }
